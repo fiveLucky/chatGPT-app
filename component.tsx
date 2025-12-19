@@ -53,7 +53,8 @@ const App = () => {
         return;
       }
 
-      const response = await fetch('/calculate', {
+      // Use absolute URL for production to ensure correct routing in iframe
+      const response = await fetch('https://calculate-sum.zeabur.app/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ a: numA, b: numB })
