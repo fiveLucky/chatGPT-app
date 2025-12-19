@@ -38,13 +38,25 @@ server.tool(
         },
       ],
       // Add metadata for Apps SDK to trigger the widget
-      // This is the experimental way to hint ChatGPT to load the widget
       _meta: {
         openai: {
           widget: {
             type: "javascript",
-            url: "/component.js", // This will be resolved relative to your server
+            url: "/component.js",
           },
+          // Imitating Figma's production-ready configuration
+          widgetContext: {
+            // Allows the widget to connect back to this server
+            connect_domains: [
+              // In production, replace with your actual HTTPS domain
+              "https://calculate-sum.zeabur.app",
+            ],
+            // Allows loading images/scripts from these domains
+            resource_domains: ["https://calculate-sum.zeabur.app"],
+          },
+          // UI Preference
+          widgetPrefersBorder: true,
+          widgetTitle: "Calculator",
         },
       },
     };
