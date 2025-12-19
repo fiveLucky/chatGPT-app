@@ -2,9 +2,15 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
+import path from "path";
 
 const app = express();
 app.use(express.json());
+
+// Serve static files
+const staticDir = process.cwd();
+console.log(`Serving static files from: ${staticDir}`);
+app.use(express.static(staticDir));
 
 const server = new McpServer({
   name: "chatgpt-app-demo",
@@ -32,6 +38,15 @@ server.tool(
 
 // Map to store transports by session ID
 const transports = new Map<string, SSEServerTransport>();
+
+app.post("/calculate", (req, res) => {
+  const { a, b } = req.body;
+  if (typeof a !== "number" || typeof b !== "number") {
+    res.status(400).json({ error: "Invalid inputs" });
+    return;
+  }
+  res.json({ result: a + b });
+});
 
 app.get("/mcp", async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
