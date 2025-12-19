@@ -11,6 +11,11 @@ app.use(express.json());
 const staticDir = process.cwd();
 console.log(`Serving static files from: ${staticDir}`);
 app.use(express.static(staticDir));
+// Specifically serve the built component bundle
+// Note: path.join works better with relative paths than serving staticDir directly again with a specific file
+app.get("/component.js", (req, res) => {
+  res.sendFile(path.join(staticDir, "dist/component.js"));
+});
 
 const server = new McpServer({
   name: "chatgpt-app-demo",
@@ -32,6 +37,16 @@ server.tool(
           text: String(a + b),
         },
       ],
+      // Add metadata for Apps SDK to trigger the widget
+      // This is the experimental way to hint ChatGPT to load the widget
+      _meta: {
+        openai: {
+          widget: {
+            type: "javascript",
+            url: "/component.js", // This will be resolved relative to your server
+          },
+        },
+      },
     };
   }
 );
