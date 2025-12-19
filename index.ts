@@ -22,37 +22,90 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Register the UI resource as a template
+// The URI must be unique, e.g., "ui://calculator"
+server.registerResource(
+  "calculator_ui",
+  "ui://calculator",
+  {
+    mimeType: "text/html+skybridge", // Critical for ChatGPT to recognize this as a UI Widget
+  },
+  async (uri, extra) => {
+    // Construct the HTML that loads our widget bundle
+    // This matches the "Step 1" screenshot approach
+    const widgetHtml = `
+<div id="root"></div>
+<script type="module" src="https://calculate-sum.zeabur.app/component.js"></script>
+    `.trim();
+
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/html+skybridge",
+          text: widgetHtml,
+        },
+      ],
+    };
+  }
+);
+
 server.tool(
   "calculate_sum",
-  "Calculates the sum of two numbers",
+  // @ts-ignore: Adding _meta to the tool definition as per OpenAI Apps SDK requirement
+  {
+    title: "Calculates the sum of two numbers",
+    inputSchema: {
+      type: "object",
+      properties: {
+        a: z.number().describe("The first number"),
+        b: z.number().describe("The second number"),
+      },
+    },
+    // This is the CRITICAL part from the docs
+    _meta: {
+      "openai/outputTemplate": "ui://calculator",
+    },
+  },
   {
     a: z.number().describe("The first number"),
     b: z.number().describe("The second number"),
   },
   async ({ a, b }) => {
+    // Construct the absolute URL for the widget
+    // We'll use the domain we configured or fall back to a placeholder if not set
+    const domain = "https://calculate-sum.zeabur.app";
+    const widgetUrl = `${domain}/component.js`;
+
     return {
+      // Step 3 from your screenshot: Provide concise structured data for the widget
+      structuredContent: {
+        a,
+        b,
+        result: a + b,
+      },
       content: [
         {
           type: "text",
-          text: String(a + b),
+          // Instruct the model to look at the UI
+          text: `I have opened the calculator widget for you with inputs ${a} and ${b}. Please interact with the UI above.`,
         },
       ],
-      // Add metadata for Apps SDK to trigger the widget
       _meta: {
         openai: {
           widget: {
             type: "javascript",
-            url: "/component.js",
+            url: widgetUrl,
           },
+          // Standard way to link a resource template
+          outputTemplate: "ui://calculator",
+
           // Imitating Figma's production-ready configuration
           widgetContext: {
             // Allows the widget to connect back to this server
-            connect_domains: [
-              // In production, replace with your actual HTTPS domain
-              "https://calculate-sum.zeabur.app",
-            ],
+            connect_domains: [domain],
             // Allows loading images/scripts from these domains
-            resource_domains: ["https://calculate-sum.zeabur.app"],
+            resource_domains: [domain],
           },
           // UI Preference
           widgetPrefersBorder: true,
