@@ -33,7 +33,7 @@ server.tool(
 // Map to store transports by session ID
 const transports = new Map<string, SSEServerTransport>();
 
-app.get("/sse", async (req, res) => {
+app.get("/mcp", async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   const sessionId = transport.sessionId;
 
@@ -68,6 +68,6 @@ app.post("/messages", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(
-    `ChatGPT App (MCP Server) running on http://localhost:${PORT}/sse`
+    `ChatGPT App (MCP Server) running on http://localhost:${PORT}/mcp`
   );
 });
