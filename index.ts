@@ -573,6 +573,20 @@ const httpServer = createServer(
         return;
       }
 
+      // Serve domain verification file for OpenAI Apps
+      if (req.method === "GET" && url.pathname === "/.well-known/openai-apps-c") {
+        const projectRoot = path.resolve(__dirname, "..");
+        const verificationPath = path.join(projectRoot, ".well-known", "openai-apps-c");
+        if (fs.existsSync(verificationPath)) {
+          res.setHeader("Content-Type", "text/plain");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          fs.createReadStream(verificationPath).pipe(res);
+        } else {
+          res.writeHead(404).end("Verification file not found");
+        }
+        return;
+      }
+
       // 404 for everything else
       logRequest(method, pathname, 404);
       res.writeHead(404).end("Not Found");
