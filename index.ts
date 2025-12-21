@@ -309,23 +309,24 @@ async function handleSseRequest(res: ServerResponse) {
   const sessionId = transport.sessionId;
 
   sessions.set(sessionId, { server, transport });
-  console.log(`New SSE session: ${sessionId}`);
+  logRequest("GET", "/mcp", undefined, undefined);
+  console.log(`  → New SSE session: ${sessionId}`);
 
   transport.onclose = async () => {
-    console.log(`SSE session closed: ${sessionId}`);
+    console.log(`  → SSE session closed: ${sessionId}`);
     sessions.delete(sessionId);
     await server.close();
   };
 
   transport.onerror = (error) => {
-    console.error("SSE transport error:", error);
+    logError(`SSE transport error for session ${sessionId}`, error);
   };
 
   try {
     await server.connect(transport);
   } catch (error) {
     sessions.delete(sessionId);
-    console.error("Failed to start SSE session:", error);
+    logError(`Failed to start SSE session ${sessionId}`, error);
     if (!res.headersSent) {
       res.writeHead(500).end("Failed to establish SSE connection");
     }
@@ -341,8 +342,10 @@ async function handlePostMessage(
   res.setHeader("Access-Control-Allow-Headers", "content-type");
 
   const sessionId = url.searchParams.get("sessionId");
+  console.log(`  → Processing MCP message for session: ${sessionId || "none"}`);
 
   if (!sessionId) {
+    logError("Missing sessionId in POST /mcp/messages");
     res.writeHead(400).end("Missing sessionId query parameter");
     return;
   }
@@ -350,6 +353,7 @@ async function handlePostMessage(
   const session = sessions.get(sessionId);
 
   if (!session) {
+    logError(`Unknown session: ${sessionId}`);
     res.writeHead(404).end("Unknown session");
     return;
   }
@@ -357,7 +361,7 @@ async function handlePostMessage(
   try {
     await session.transport.handlePostMessage(req, res);
   } catch (error) {
-    console.error("Failed to process message:", error);
+    logError(`Failed to process message for session ${sessionId}`, error);
     if (!res.headersSent) {
       res.writeHead(500).end("Failed to process message");
     }
@@ -373,15 +377,35 @@ function serveStaticFile(
   filePath: string,
   contentType: string
 ) {
-  const fullPath = path.join(__dirname, filePath);
+  // When running from dist/index.js, __dirname is dist/, so component.js is at dist/component.js
+  // Try multiple possible paths for robustness
+  const possiblePaths = [
+    path.join(__dirname, filePath), // dist/component.js when running from dist/index.js
+    path.resolve(process.cwd(), "dist", filePath), // dist/component.js from cwd (for Docker)
+    path.resolve(process.cwd(), filePath), // component.js from cwd (fallback)
+  ];
 
-  if (!fs.existsSync(fullPath)) {
-    res.writeHead(404).end("File not found");
+  let fullPath: string | null = null;
+  for (const possiblePath of possiblePaths) {
+    if (fs.existsSync(possiblePath)) {
+      fullPath = possiblePath;
+      console.log(`  → Serving ${filePath} from: ${fullPath}`);
+      break;
+    }
+  }
+
+  if (!fullPath) {
+    logError(`File not found: ${filePath}`);
+    console.error(`  → Tried paths:`, possiblePaths);
+    console.error(`  → __dirname: ${__dirname}`);
+    console.error(`  → process.cwd(): ${process.cwd()}`);
+    res.writeHead(404).end(`File not found: ${filePath}`);
     return;
   }
 
   res.setHeader("Content-Type", contentType);
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=3600");
   fs.createReadStream(fullPath).pipe(res);
 }
 
@@ -400,16 +424,55 @@ async function handleCalculateApi(req: IncomingMessage, res: ServerResponse) {
 
   try {
     const { a, b } = JSON.parse(body);
+    console.log(`  → Calculate request: a=${a}, b=${b}`);
 
     if (typeof a !== "number" || typeof b !== "number") {
+      logError(`Invalid inputs: a=${a} (${typeof a}), b=${b} (${typeof b})`);
       res.writeHead(400).end(JSON.stringify({ error: "Invalid inputs" }));
       return;
     }
 
-    res.writeHead(200).end(JSON.stringify({ result: a + b }));
+    const result = a + b;
+    console.log(`  → Calculate result: ${result}`);
+    res.writeHead(200).end(JSON.stringify({ result }));
   } catch (error) {
+    logError("Failed to parse calculate request body", error);
     res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" }));
   }
+}
+
+// ============================================================================
+// Logging Utilities
+// ============================================================================
+
+/**
+ * Formats a timestamp for logging
+ */
+function getTimestamp(): string {
+  return new Date().toISOString();
+}
+
+/**
+ * Logs incoming HTTP requests
+ */
+function logRequest(
+  method: string,
+  pathname: string,
+  statusCode?: number,
+  duration?: number
+) {
+  const timestamp = getTimestamp();
+  const status = statusCode ? ` [${statusCode}]` : "";
+  const time = duration ? ` (${duration}ms)` : "";
+  console.log(`[${timestamp}] ${method} ${pathname}${status}${time}`);
+}
+
+/**
+ * Logs errors
+ */
+function logError(message: string, error?: unknown) {
+  const timestamp = getTimestamp();
+  console.error(`[${timestamp}] ERROR: ${message}`, error || "");
 }
 
 // ============================================================================
@@ -421,67 +484,105 @@ const port = Number.isFinite(portEnv) ? portEnv : 3000;
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
-    if (!req.url) {
-      res.writeHead(400).end("Missing URL");
-      return;
-    }
+    const startTime = Date.now();
+    const method = req.method || "UNKNOWN";
+    let pathname = "unknown";
 
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
-
-    // Handle CORS preflight
-    if (req.method === "OPTIONS") {
-      res.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "content-type",
-      });
-      res.end();
-      return;
-    }
-
-    // SSE endpoint for MCP
-    if (req.method === "GET" && url.pathname === ssePath) {
-      await handleSseRequest(res);
-      return;
-    }
-
-    // POST endpoint for MCP messages
-    if (req.method === "POST" && url.pathname === postPath) {
-      await handlePostMessage(req, res, url);
-      return;
-    }
-
-    // API endpoint for direct widget calculations
-    if (req.method === "POST" && url.pathname === "/calculate") {
-      await handleCalculateApi(req, res);
-      return;
-    }
-
-    // Serve the bundled React component
-    // Note: When running from dist/index.js, component.js is in the same directory
-    if (req.method === "GET" && url.pathname === "/component.js") {
-      serveStaticFile(req, res, "component.js", "application/javascript");
-      return;
-    }
-
-    // Serve index.html for root (from project root, not dist)
-    if (req.method === "GET" && url.pathname === "/") {
-      const projectRoot = path.resolve(__dirname, "..");
-      const htmlPath = path.join(projectRoot, "index.html");
-      if (fs.existsSync(htmlPath)) {
-        res.setHeader("Content-Type", "text/html");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        fs.createReadStream(htmlPath).pipe(res);
-      } else {
-        res.writeHead(404).end("index.html not found");
+    try {
+      if (!req.url) {
+        logRequest(method, "unknown", 400);
+        res.writeHead(400).end("Missing URL");
+        return;
       }
-      return;
-    }
 
-    // 404 for everything else
-    res.writeHead(404).end("Not Found");
+      const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+      pathname = url.pathname;
+
+      // Log incoming request
+      logRequest(method, pathname);
+
+      // Track response status
+      let statusCode = 200;
+      const originalEnd = res.end.bind(res);
+      res.end = function (
+        chunk?: any,
+        encoding?: any,
+        cb?: () => void
+      ): ServerResponse {
+        const duration = Date.now() - startTime;
+        statusCode = res.statusCode || 200;
+        logRequest(method, pathname, statusCode, duration);
+        return originalEnd(chunk, encoding, cb);
+      };
+
+      // Handle CORS preflight
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "content-type",
+        });
+        res.end();
+        return;
+      }
+
+      // SSE endpoint for MCP
+      if (req.method === "GET" && url.pathname === ssePath) {
+        await handleSseRequest(res);
+        return;
+      }
+
+      // POST endpoint for MCP messages
+      if (req.method === "POST" && url.pathname === postPath) {
+        await handlePostMessage(req, res, url);
+        return;
+      }
+
+      // API endpoint for direct widget calculations
+      if (req.method === "POST" && url.pathname === "/calculate") {
+        await handleCalculateApi(req, res);
+        return;
+      }
+
+      // Serve the bundled React component
+      // Note: When running from dist/index.js, component.js is in the same directory
+      if (req.method === "GET" && url.pathname === "/component.js") {
+        serveStaticFile(req, res, "component.js", "application/javascript");
+        return;
+      }
+
+      // Serve index.html for root (from project root, not dist)
+      if (req.method === "GET" && url.pathname === "/") {
+        const projectRoot = path.resolve(__dirname, "..");
+        const htmlPath = path.join(projectRoot, "index.html");
+        if (fs.existsSync(htmlPath)) {
+          res.setHeader("Content-Type", "text/html");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          fs.createReadStream(htmlPath).pipe(res);
+        } else {
+          res.writeHead(404).end("index.html not found");
+        }
+        return;
+      }
+
+      // 404 for everything else
+      logRequest(method, pathname, 404);
+      res.writeHead(404).end("Not Found");
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logError(`Unhandled error processing ${method} ${pathname}`, error);
+      if (!res.headersSent) {
+        res.writeHead(500).end("Internal Server Error");
+      }
+      logRequest(method, pathname, 500, duration);
+    }
   }
 );
+
+// Handle server errors
+httpServer.on("error", (err: Error) => {
+  logError("HTTP server error", err);
+});
 
 httpServer.on("clientError", (err: Error, socket) => {
   console.error("HTTP client error:", err);
@@ -496,4 +597,14 @@ httpServer.listen(port, () => {
   );
   console.log(`  Widget bundle:  GET  http://localhost:${port}/component.js`);
   console.log(`  Calculate API:  POST http://localhost:${port}/calculate`);
+
+  // Verify component.js exists
+  const componentPath = path.join(__dirname, "component.js");
+  if (fs.existsSync(componentPath)) {
+    console.log(`✓ component.js found at: ${componentPath}`);
+  } else {
+    console.warn(`⚠ component.js not found at: ${componentPath}`);
+    console.warn(`  __dirname: ${__dirname}`);
+    console.warn(`  process.cwd(): ${process.cwd()}`);
+  }
 });
