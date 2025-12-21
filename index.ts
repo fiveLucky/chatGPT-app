@@ -75,11 +75,28 @@ function getWidgetHtml(): string {
  * This tells ChatGPT how to handle the widget.
  */
 function widgetDescriptorMeta(widget: CalculatorWidget) {
+  // Get the widget domain from environment or use default
+  const widgetDomain =
+    process.env.WIDGET_DOMAIN || "https://calculate-sum.zeabur.app";
+
   return {
     "openai/outputTemplate": widget.templateUri,
     "openai/toolInvocation/invoking": widget.invoking,
     "openai/toolInvocation/invoked": widget.invoked,
     "openai/widgetAccessible": true,
+    // Required for app submission: Widget Domain
+    "openai/widgetDomain": widgetDomain,
+    // Required for app submission: Content Security Policy
+    "openai/widgetCSP": {
+      // Domains the widget can connect to (for API calls)
+      connect_domains: [widgetDomain],
+      // Domains for loading static resources (images, fonts, scripts)
+      resource_domains: [widgetDomain],
+      // Optional: Allow embedding iframes from these domains
+      // frame_domains: [], // Not needed for our calculator widget
+    },
+    // Optional: Widget UI preference
+    "openai/widgetPrefersBorder": true,
   } as const;
 }
 
