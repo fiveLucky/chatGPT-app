@@ -574,9 +574,16 @@ const httpServer = createServer(
       }
 
       // Serve domain verification file for OpenAI Apps
-      if (req.method === "GET" && url.pathname === "/.well-known/openai-apps-c") {
+      if (
+        req.method === "GET" &&
+        url.pathname === "/.well-known/openai-apps-challenge"
+      ) {
         const projectRoot = path.resolve(__dirname, "..");
-        const verificationPath = path.join(projectRoot, ".well-known", "openai-apps-c");
+        const verificationPath = path.join(
+          projectRoot,
+          ".well-known",
+          "openai-apps-challenge"
+        );
         if (fs.existsSync(verificationPath)) {
           res.setHeader("Content-Type", "text/plain");
           res.setHeader("Access-Control-Allow-Origin", "*");
