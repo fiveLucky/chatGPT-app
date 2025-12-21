@@ -41,18 +41,22 @@ type CalculatorWidget = {
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.resolve(__dirname, "dist");
+const ASSETS_DIR = path.resolve(__dirname, "assets");
+const ROOT_DIR = path.resolve(__dirname);
 
 /**
- * Reads the widget HTML file from the dist directory.
- * The component.tsx is bundled into dist/component.js, and we wrap it in HTML.
+ * Reads the widget HTML file from the assets directory.
  */
-function getWidgetHtml(): string {
-  // For the widget, we generate HTML that loads our bundled React component
-  // In production, this should use your deployed domain
+function readWidgetHtml(widgetName: string): string {
+  const htmlPath = path.join(ASSETS_DIR, `${widgetName}.html`);
+
+  if (fs.existsSync(htmlPath)) {
+    return fs.readFileSync(htmlPath, "utf-8");
+  }
+
+  // Fallback: generate HTML if file doesn't exist
   const domain =
     process.env.WIDGET_DOMAIN || "https://calculate-sum.zeabur.app";
-
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -64,8 +68,8 @@ function getWidgetHtml(): string {
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="${domain}/component.js"></script>
+  <div id="${widgetName}-root"></div>
+  <script type="module" src="${domain}/assets/${widgetName}.js"></script>
 </body>
 </html>`;
 }
@@ -110,83 +114,158 @@ function widgetInvocationMeta(widget: CalculatorWidget) {
   } as const;
 }
 
-// Define our calculator widget
-const calculatorWidget: CalculatorWidget = {
-  id: "calculate_sum",
-  title: "Calculate Sum",
-  templateUri: "ui://widget/calculator.html",
-  invoking: "Opening calculator...",
-  invoked: "Calculator ready",
-  html: getWidgetHtml(),
-  responseText: "Calculator widget rendered!",
-};
+// Define all calculator widgets
+const widgets: CalculatorWidget[] = [
+  {
+    id: "add",
+    title: "Addition Calculator",
+    templateUri: "ui://widget/add.html",
+    invoking: "Opening addition calculator...",
+    invoked: "Addition calculator ready",
+    html: readWidgetHtml("add"),
+    responseText: "Addition calculator rendered!",
+  },
+  {
+    id: "subtract",
+    title: "Subtraction Calculator",
+    templateUri: "ui://widget/subtract.html",
+    invoking: "Opening subtraction calculator...",
+    invoked: "Subtraction calculator ready",
+    html: readWidgetHtml("subtract"),
+    responseText: "Subtraction calculator rendered!",
+  },
+  {
+    id: "multiply",
+    title: "Multiplication Calculator",
+    templateUri: "ui://widget/multiply.html",
+    invoking: "Opening multiplication calculator...",
+    invoked: "Multiplication calculator ready",
+    html: readWidgetHtml("multiply"),
+    responseText: "Multiplication calculator rendered!",
+  },
+  {
+    id: "divide",
+    title: "Division Calculator",
+    templateUri: "ui://widget/divide.html",
+    invoking: "Opening division calculator...",
+    invoked: "Division calculator ready",
+    html: readWidgetHtml("divide"),
+    responseText: "Division calculator rendered!",
+  },
+  {
+    id: "super-calculator",
+    title: "Super Calculator",
+    templateUri: "ui://widget/super-calculator.html",
+    invoking: "Opening super calculator...",
+    invoked: "Super calculator ready",
+    html: readWidgetHtml("super-calculator"),
+    responseText: "Super calculator rendered!",
+  },
+];
+
+const widgetsById = new Map<string, CalculatorWidget>();
+const widgetsByUri = new Map<string, CalculatorWidget>();
+
+widgets.forEach((widget) => {
+  widgetsById.set(widget.id, widget);
+  widgetsByUri.set(widget.templateUri, widget);
+});
 
 // ============================================================================
 // MCP Protocol Definitions
 // ============================================================================
 
-const toolInputSchema = {
+// Common tool input schema for basic operations
+const basicToolInputSchema = {
   type: "object" as const,
   properties: {
     a: {
       type: "number",
-      description: "The first number to add",
+      description: "The first number",
     },
     b: {
       type: "number",
-      description: "The second number to add",
+      description: "The second number",
     },
   },
   required: ["a", "b"] as string[],
   additionalProperties: false,
 };
 
-const toolInputParser = z.object({
+// Tool input schema for super calculator
+const superCalculatorInputSchema = {
+  type: "object" as const,
+  properties: {
+    a: {
+      type: "number",
+      description: "The first number",
+    },
+    b: {
+      type: "number",
+      description: "The second number",
+    },
+    operation: {
+      type: "string",
+      enum: ["add", "subtract", "multiply", "divide"],
+      description: "The operation to perform",
+    },
+  },
+  required: ["a", "b", "operation"] as string[],
+  additionalProperties: false,
+};
+
+const basicToolInputParser = z.object({
   a: z.number(),
   b: z.number(),
 });
 
+const superCalculatorInputParser = z.object({
+  a: z.number(),
+  b: z.number(),
+  operation: z.enum(["add", "subtract", "multiply", "divide"]),
+});
+
 // Tools list - exposed via ListTools
-const tools: Tool[] = [
-  {
-    name: calculatorWidget.id,
-    description: "Calculates the sum of two numbers and shows a calculator UI",
-    inputSchema: toolInputSchema,
-    // @ts-ignore - _meta is an extension for OpenAI Apps SDK
-    title: calculatorWidget.title,
-    _meta: widgetDescriptorMeta(calculatorWidget),
-    // Annotations to control approval prompts
-    annotations: {
-      destructiveHint: false,
-      openWorldHint: false,
-      readOnlyHint: true,
-    },
+const tools: Tool[] = widgets.map((widget) => ({
+  name: widget.id,
+  description:
+    widget.id === "super-calculator"
+      ? "A super calculator that can perform addition, subtraction, multiplication, and division operations"
+      : `Performs ${widget.title.toLowerCase()} and shows a calculator UI`,
+  inputSchema:
+    widget.id === "super-calculator"
+      ? superCalculatorInputSchema
+      : basicToolInputSchema,
+  // @ts-ignore - _meta is an extension for OpenAI Apps SDK
+  title: widget.title,
+  _meta: widgetDescriptorMeta(widget),
+  // Annotations to control approval prompts
+  annotations: {
+    destructiveHint: false,
+    openWorldHint: false,
+    readOnlyHint: true,
   },
-];
+}));
 
 // Resources list - exposed via ListResources
-const resources: Resource[] = [
-  {
-    uri: calculatorWidget.templateUri,
-    name: calculatorWidget.title,
-    description: `${calculatorWidget.title} widget markup`,
-    mimeType: "text/html+skybridge",
-    // @ts-ignore - _meta is an extension for OpenAI Apps SDK
-    _meta: widgetDescriptorMeta(calculatorWidget),
-  },
-];
+const resources: Resource[] = widgets.map((widget) => ({
+  uri: widget.templateUri,
+  name: widget.title,
+  description: `${widget.title} widget markup`,
+  mimeType: "text/html+skybridge",
+  // @ts-ignore - _meta is an extension for OpenAI Apps SDK
+  _meta: widgetDescriptorMeta(widget),
+}));
 
 // Resource templates - exposed via ListResourceTemplates
-const resourceTemplates: ResourceTemplate[] = [
-  {
-    uriTemplate: calculatorWidget.templateUri,
-    name: calculatorWidget.title,
-    description: `${calculatorWidget.title} widget markup`,
-    mimeType: "text/html+skybridge",
-    // @ts-ignore - _meta is an extension for OpenAI Apps SDK
-    _meta: widgetDescriptorMeta(calculatorWidget),
-  },
-];
+const resourceTemplates: ResourceTemplate[] = widgets.map((widget) => ({
+  uriTemplate: widget.templateUri,
+  name: widget.title,
+  description: `${widget.title} widget markup`,
+  mimeType: "text/html+skybridge",
+  // @ts-ignore - _meta is an extension for OpenAI Apps SDK
+  _meta: widgetDescriptorMeta(widget),
+}));
 
 // ============================================================================
 // MCP Server Factory
@@ -218,18 +297,23 @@ function createCalculatorServer(): Server {
   server.setRequestHandler(
     ReadResourceRequestSchema,
     async (request: ReadResourceRequest) => {
-      if (request.params.uri !== calculatorWidget.templateUri) {
+      const widget = widgetsByUri.get(request.params.uri);
+
+      if (!widget) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
       }
+
+      // Reload HTML in case it was updated
+      widget.html = readWidgetHtml(widget.id);
 
       return {
         contents: [
           {
-            uri: calculatorWidget.templateUri,
+            uri: widget.templateUri,
             mimeType: "text/html+skybridge",
-            text: calculatorWidget.html,
+            text: widget.html,
             // @ts-ignore
-            _meta: widgetDescriptorMeta(calculatorWidget),
+            _meta: widgetDescriptorMeta(widget),
           },
         ],
       };
@@ -256,26 +340,86 @@ function createCalculatorServer(): Server {
   server.setRequestHandler(
     CallToolRequestSchema,
     async (request: CallToolRequest) => {
-      if (request.params.name !== calculatorWidget.id) {
+      const widget = widgetsById.get(request.params.name);
+
+      if (!widget) {
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const args = toolInputParser.parse(request.params.arguments ?? {});
-      const sum = args.a + args.b;
+      let result: number;
+      let operationText: string;
+      let parsedArgs: { a: number; b: number; operation?: string };
+
+      if (widget.id === "super-calculator") {
+        parsedArgs = superCalculatorInputParser.parse(
+          request.params.arguments ?? {}
+        );
+        switch (parsedArgs.operation) {
+          case "add":
+            result = parsedArgs.a + parsedArgs.b;
+            operationText = `sum of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "subtract":
+            result = parsedArgs.a - parsedArgs.b;
+            operationText = `difference of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "multiply":
+            result = parsedArgs.a * parsedArgs.b;
+            operationText = `product of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "divide":
+            if (parsedArgs.b === 0) {
+              throw new Error("Cannot divide by zero");
+            }
+            result = parsedArgs.a / parsedArgs.b;
+            operationText = `quotient of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          default:
+            throw new Error(`Unknown operation: ${parsedArgs.operation}`);
+        }
+      } else {
+        parsedArgs = basicToolInputParser.parse(request.params.arguments ?? {});
+        switch (widget.id) {
+          case "add":
+            result = parsedArgs.a + parsedArgs.b;
+            operationText = `sum of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "subtract":
+            result = parsedArgs.a - parsedArgs.b;
+            operationText = `difference of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "multiply":
+            result = parsedArgs.a * parsedArgs.b;
+            operationText = `product of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          case "divide":
+            if (parsedArgs.b === 0) {
+              throw new Error("Cannot divide by zero");
+            }
+            result = parsedArgs.a / parsedArgs.b;
+            operationText = `quotient of ${parsedArgs.a} and ${parsedArgs.b}`;
+            break;
+          default:
+            throw new Error(`Unknown operation: ${widget.id}`);
+        }
+      }
 
       return {
         content: [
           {
             type: "text",
-            text: `The sum of ${args.a} and ${args.b} is ${sum}. ${calculatorWidget.responseText}`,
+            text: `The ${operationText} is ${result}. ${widget.responseText}`,
           },
         ],
         structuredContent: {
-          a: args.a,
-          b: args.b,
-          result: sum,
+          a: parsedArgs.a,
+          b: parsedArgs.b,
+          ...(widget.id === "super-calculator" && {
+            operation: parsedArgs.operation,
+          }),
+          result,
         },
-        _meta: widgetInvocationMeta(calculatorWidget),
+        _meta: widgetInvocationMeta(widget),
       };
     }
   );
@@ -369,37 +513,37 @@ async function handlePostMessage(
 }
 
 /**
- * Serves static files from the dist directory.
+ * Serves static files from the assets directory.
  */
 function serveStaticFile(
   req: IncomingMessage,
   res: ServerResponse,
-  filePath: string,
+  fileName: string,
   contentType: string
 ) {
-  // When running from dist/index.js, __dirname is dist/, so component.js is at dist/component.js
   // Try multiple possible paths for robustness
   const possiblePaths = [
-    path.join(__dirname, filePath), // dist/component.js when running from dist/index.js
-    path.resolve(process.cwd(), "dist", filePath), // dist/component.js from cwd (for Docker)
-    path.resolve(process.cwd(), filePath), // component.js from cwd (fallback)
+    path.join(ASSETS_DIR, fileName), // assets/fileName when running from dist/index.js
+    path.resolve(process.cwd(), "assets", fileName), // assets/fileName from cwd (for Docker)
+    path.resolve(process.cwd(), fileName), // fileName from cwd (fallback)
   ];
 
   let fullPath: string | null = null;
   for (const possiblePath of possiblePaths) {
     if (fs.existsSync(possiblePath)) {
       fullPath = possiblePath;
-      console.log(`  → Serving ${filePath} from: ${fullPath}`);
+      console.log(`  → Serving ${fileName} from: ${fullPath}`);
       break;
     }
   }
 
   if (!fullPath) {
-    logError(`File not found: ${filePath}`);
+    logError(`File not found: ${fileName}`);
     console.error(`  → Tried paths:`, possiblePaths);
+    console.error(`  → ASSETS_DIR: ${ASSETS_DIR}`);
     console.error(`  → __dirname: ${__dirname}`);
     console.error(`  → process.cwd(): ${process.cwd()}`);
-    res.writeHead(404).end(`File not found: ${filePath}`);
+    res.writeHead(404).end(`File not found: ${fileName}`);
     return;
   }
 
@@ -552,11 +696,57 @@ const httpServer = createServer(
         return;
       }
 
-      // Serve the bundled React component
-      // Note: When running from dist/index.js, component.js is in the same directory
-      if (req.method === "GET" && url.pathname === "/component.js") {
-        serveStaticFile(req, res, "component.js", "application/javascript");
-        return;
+      // Serve static assets (JS, CSS files from assets directory)
+      // Handle both /assets/filename and /filename patterns
+      if (
+        req.method === "GET" &&
+        url.pathname !== ssePath &&
+        url.pathname !== postPath
+      ) {
+        let fileName: string;
+
+        // Check if path starts with /assets/
+        if (url.pathname.startsWith("/assets/")) {
+          fileName = url.pathname.slice("/assets/".length); // Remove "/assets/" prefix
+        } else {
+          fileName = url.pathname.slice(1); // Remove leading slash (backward compatibility)
+        }
+
+        if (fileName && !fileName.includes("..")) {
+          // Only serve files that exist in assets directory
+          // Security: prevent directory traversal
+          const fullPath = path.join(ASSETS_DIR, fileName);
+          const normalizedPath = path.normalize(fullPath);
+          const normalizedAssetsDir = path.normalize(ASSETS_DIR);
+
+          // Ensure the resolved path is within ASSETS_DIR
+          const isWithinAssetsDir = normalizedPath.startsWith(
+            normalizedAssetsDir + path.sep
+          );
+
+          if (isWithinAssetsDir && fs.existsSync(normalizedPath)) {
+            try {
+              const stats = fs.statSync(normalizedPath);
+              if (stats.isFile()) {
+                // Determine content type
+                let contentType = "application/octet-stream";
+                if (fileName.endsWith(".js")) {
+                  contentType = "application/javascript";
+                } else if (fileName.endsWith(".css")) {
+                  contentType = "text/css";
+                } else if (fileName.endsWith(".html")) {
+                  contentType = "text/html";
+                }
+
+                serveStaticFile(req, res, fileName, contentType);
+                return;
+              }
+            } catch (error) {
+              console.error(`Error serving static file ${fileName}:`, error);
+              // File access error, fall through to 404
+            }
+          }
+        }
       }
 
       // Serve index.html for root (from project root, not dist)
@@ -624,16 +814,15 @@ httpServer.listen(port, () => {
   console.log(
     `  Message post:   POST http://localhost:${port}${postPath}?sessionId=...`
   );
-  console.log(`  Widget bundle:  GET  http://localhost:${port}/component.js`);
-  console.log(`  Calculate API:  POST http://localhost:${port}/calculate`);
+  console.log(`  Static assets:  GET  http://localhost:${port}/assets/*`);
+  console.log(`  Available tools: ${widgets.map((w) => w.id).join(", ")}`);
 
-  // Verify component.js exists
-  const componentPath = path.join(__dirname, "component.js");
-  if (fs.existsSync(componentPath)) {
-    console.log(`✓ component.js found at: ${componentPath}`);
+  // Verify assets directory exists
+  if (fs.existsSync(ASSETS_DIR)) {
+    const assetFiles = fs.readdirSync(ASSETS_DIR);
+    console.log(`✓ Assets directory found with ${assetFiles.length} files`);
   } else {
-    console.warn(`⚠ component.js not found at: ${componentPath}`);
-    console.warn(`  __dirname: ${__dirname}`);
-    console.warn(`  process.cwd(): ${process.cwd()}`);
+    console.warn(`⚠ Assets directory not found at: ${ASSETS_DIR}`);
+    console.warn(`  Run 'pnpm build' to build the widgets`);
   }
 });

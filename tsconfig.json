@@ -42,5 +42,5 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
   },
-  "exclude": ["node_modules", "dist", "component.tsx"]
+  "exclude": ["node_modules", "dist", "component.tsx", "src", "build-all.mts"]
 }
