@@ -403,9 +403,15 @@ function serveStaticFile(
     return;
   }
 
-  res.setHeader("Content-Type", contentType);
+  // Set CORS headers before sending the file
+  // Critical for ChatGPT sandbox to load the script
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Content-Type", contentType);
   res.setHeader("Cache-Control", "public, max-age=3600");
+
+  // Send the file
   fs.createReadStream(fullPath).pipe(res);
 }
 
@@ -515,12 +521,14 @@ const httpServer = createServer(
         return originalEnd(chunk, encoding, cb);
       };
 
-      // Handle CORS preflight
+      // Handle CORS preflight for all paths
+      // Critical for ChatGPT sandbox to load resources
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "content-type",
+          "Access-Control-Allow-Headers": "Content-Type, Accept",
+          "Access-Control-Max-Age": "86400", // Cache preflight for 24 hours
         });
         res.end();
         return;
