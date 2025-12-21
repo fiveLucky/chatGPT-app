@@ -41,7 +41,27 @@ type CalculatorWidget = {
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ASSETS_DIR = path.resolve(__dirname, "assets");
+// When running from dist/index.js, __dirname is dist/, so assets is at ../assets
+// Try multiple possible paths for robustness
+const ASSETS_DIR = (() => {
+  const possiblePaths = [
+    path.resolve(__dirname, "..", "assets"), // assets from project root (when running from dist/index.js)
+    path.resolve(process.cwd(), "assets"), // assets from cwd (for Docker and direct execution)
+    path.resolve(__dirname, "assets"), // dist/assets (fallback)
+  ];
+
+  for (const possiblePath of possiblePaths) {
+    if (fs.existsSync(possiblePath)) {
+      console.log(`Using ASSETS_DIR: ${possiblePath}`);
+      return possiblePath;
+    }
+  }
+
+  // Fallback to project root/assets
+  const fallback = path.resolve(__dirname, "..", "assets");
+  console.warn(`ASSETS_DIR not found, using fallback: ${fallback}`);
+  return fallback;
+})();
 const ROOT_DIR = path.resolve(__dirname);
 
 /**
@@ -521,31 +541,19 @@ function serveStaticFile(
   fileName: string,
   contentType: string
 ) {
-  // Try multiple possible paths for robustness
-  const possiblePaths = [
-    path.join(ASSETS_DIR, fileName), // assets/fileName when running from dist/index.js
-    path.resolve(process.cwd(), "assets", fileName), // assets/fileName from cwd (for Docker)
-    path.resolve(process.cwd(), fileName), // fileName from cwd (fallback)
-  ];
+  const fullPath = path.join(ASSETS_DIR, fileName);
 
-  let fullPath: string | null = null;
-  for (const possiblePath of possiblePaths) {
-    if (fs.existsSync(possiblePath)) {
-      fullPath = possiblePath;
-      console.log(`  → Serving ${fileName} from: ${fullPath}`);
-      break;
-    }
-  }
-
-  if (!fullPath) {
+  if (!fs.existsSync(fullPath)) {
     logError(`File not found: ${fileName}`);
-    console.error(`  → Tried paths:`, possiblePaths);
+    console.error(`  → Expected path: ${fullPath}`);
     console.error(`  → ASSETS_DIR: ${ASSETS_DIR}`);
     console.error(`  → __dirname: ${__dirname}`);
     console.error(`  → process.cwd(): ${process.cwd()}`);
     res.writeHead(404).end(`File not found: ${fileName}`);
     return;
   }
+
+  console.log(`  → Serving ${fileName} from: ${fullPath}`);
 
   // Set CORS headers before sending the file
   // Critical for ChatGPT sandbox to load the script
@@ -697,20 +705,9 @@ const httpServer = createServer(
       }
 
       // Serve static assets (JS, CSS files from assets directory)
-      // Handle both /assets/filename and /filename patterns
-      if (
-        req.method === "GET" &&
-        url.pathname !== ssePath &&
-        url.pathname !== postPath
-      ) {
-        let fileName: string;
-
-        // Check if path starts with /assets/
-        if (url.pathname.startsWith("/assets/")) {
-          fileName = url.pathname.slice("/assets/".length); // Remove "/assets/" prefix
-        } else {
-          fileName = url.pathname.slice(1); // Remove leading slash (backward compatibility)
-        }
+      // IMPORTANT: This must come BEFORE the root "/" and ".well-known" handlers
+      if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
+        let fileName = url.pathname.slice("/assets/".length); // Remove "/assets/" prefix
 
         if (fileName && !fileName.includes("..")) {
           // Only serve files that exist in assets directory
